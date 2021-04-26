@@ -5,6 +5,8 @@ metadata:
 spec:
   params:
     # Passed in through secure-properties: apikey, dockerhub-token
+    - name: apikey
+      description: ibmcloud api key
     - name: repository
       description: git repository url
       default: https://github.com/kubeflow/kfp-tekton
@@ -16,10 +18,11 @@ spec:
       default: kfp-tekton
     - name: registry-region
       description: The IBM Cloud region for image registry
+      default: ibm:yp:us-south
     - name: registry-namespace
       description: Container registry namespace
     - name: dev-region
-      default: ibm:yp:us-south
+      default: us-south
     - name: dev-resource-group
       default: default
     - name: cluster-name
@@ -60,6 +63,8 @@ spec:
         pipelineRef:
           name: tekton-catalog-publish-pipeline
         params:
+          - name: apikey
+            value: $(params.apikey)
           - name: repository
             value: $(params.repository)
           - name: branch

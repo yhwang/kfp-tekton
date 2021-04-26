@@ -30,8 +30,18 @@ echo "=============================="
 # Note - Permission to watch status required: "kubectl create clusterrolebinding pipeline-runner-extend --clusterrole=cluster-admin --serviceaccount=default:default"
 kubectl apply -f $MANIFEST
 
-wait_for_pipeline_run "resourceop-basic" 20 30
+RESULTS=$(wait_for_pipeline_run_rev "resourceop-basic" 10 60)
 
 kubectl delete -f $MANIFEST
 
+# Jobs run in default namespace
+kubectl delete job --all -n default
+
 popd > /dev/null
+
+if [ "$RESULTS" = "1" ]; then
+  echo "test results: FAILED"
+  exit 1
+fi
+
+echo "test results: PASSED"

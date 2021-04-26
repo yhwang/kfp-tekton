@@ -35,7 +35,7 @@ wait_for_pod "tekton-pipelines" "tekton-pipelineloop-webhook" 10 30
 
 kubectl apply -f ${E2E_MANIFEST}
 
-wait_for_pipeline_run "pr-loop-example" 20 30
+RESULTS=$(wait_for_pipeline_run_rev "pr-loop-example" 20 30)
 
 kubectl delete -f ${E2E_MANIFEST}
 
@@ -43,3 +43,8 @@ kubectl delete -f ${E2E_MANIFEST}
 # kubectl delete -f config
 
 popd > /dev/null
+
+if [ "$RESULTS" = "1" ]; then
+    echo "test result: FAILED"
+    return 1
+fi

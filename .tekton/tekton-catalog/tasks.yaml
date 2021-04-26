@@ -4,6 +4,64 @@
 apiVersion: tekton.dev/v1beta1
 kind: Task
 metadata:
+  name: git-clone
+spec:
+  params:
+    - name: repository
+      description: the git repo
+    - name: branch
+      description: the branch
+      default: master
+    - name: directory-name
+      description: directory name to git clone the project
+      default: kfp-tekton
+    - name: archive-dir
+      description: archive directory
+      default: "."
+  results:
+    - name: git-repository
+      description: The cloned repository
+    - name: git-branch
+      description: The active branch for the repository
+    - name: git-commit
+      description: The current commit id that was cloned
+    - name: git-commit-short
+      description: The current commit id that was cloned in short form
+    - name: image-tag
+      description: a temp image tag for current pipeline run
+  workspaces:
+  - name: task-pvc
+    mountPath: /artifacts
+  steps:
+    - name: git-clone-repo
+      image: docker.io/aipipeline/pipeline-base-image:1.0
+      env:
+        - name: GIT_URL
+          value: $(params.repository)
+        - name: GIT_BRANCH
+          value: $(params.branch)
+        - name: BUILD_NUMBER
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['devops.cloud.ibm.com/build-number']
+        - name: ARCHIVE_DIR
+          value: $(params.archive-dir)
+      command: ["/bin/bash", "-c"]
+      args:
+        - set -ex;
+          cd /artifacts && git clone -q -b $GIT_BRANCH $GIT_URL $(params.directory-name);
+          cd $(params.directory-name);
+          GIT_COMMIT=$(git rev-parse HEAD);
+          GIT_COMMIT_SHORT=$(git log -n1 --format=format:"%h");
+          echo -n "${GIT_URL}" > $(results.git-repository.path);
+          echo -n "${GIT_BRANCH}" > $(results.git-branch.path);
+          echo -n "${GIT_COMMIT}" > $(results.git-commit.path);
+          echo -n "${GIT_COMMIT_SHORT}" > $(results.git-commit-short.path);
+          echo -n "${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" > $(results.image-tag.path);
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
   name: build-binaries
 spec:
   params:
@@ -18,7 +76,7 @@ spec:
     mountPath: /artifacts
   steps:
     - name: build-binaries
-      image: docker.io/aipipeline/pipeline-base-image:1.0
+      image: docker.io/aipipeline/pipeline-base-image:1.2
       env:
         - name: BUILD_DIR
           value: $(params.build-dir)
@@ -95,7 +153,7 @@ spec:
     mountPath: /artifacts
   steps:
     - name: create-docker-registry-secret
-      image: docker.io/aipipeline/pipeline-base-image:1.0
+      image: docker.io/aipipeline/pipeline-base-image:1.2
       env:
         - name: API_KEY
           valueFrom:
@@ -133,7 +191,7 @@ spec:
         - mountPath: /steps
           name: steps-volume
     - name: run-docker-commands
-      image: docker.io/aipipeline/pipeline-base-image:1.0
+      image: docker.io/aipipeline/pipeline-base-image:1.2
       env:
         - name: DOCKER_HOST
           value: "tcp://localhost:2376"
@@ -238,14 +296,23 @@ spec:
     - name: directory-name
       description: Repository directory
       default: kfp-tekton
+    - name: org
+      description: organization
+    - name: space
+      description: space
   workspaces:
   - name: task-pvc
     mountPath: /artifacts
   steps:
     - name: cleanup
-      image: docker.io/aipipeline/pipeline-base-image:1.0
+      image: docker.io/aipipeline/pipeline-base-image:1.2
       env:
         - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: $(params.continuous-delivery-context-secret)
+              key: $(params.kubernetes-service-apikey-secret-key)
+        - name: IBM_CLOUD_API_KEY
           valueFrom:
             secretKeyRef:
               name: $(params.continuous-delivery-context-secret)
@@ -258,14 +325,24 @@ spec:
           value: $(params.resource-group)
         - name: CLUSTER_NAME
           value: $(params.cluster-name)
+        - name: REGION
+          value: $(params.cluster-region)
+        - name: ORG
+          value: $(params.org)
+        - name: SPACE
+          value: $(params.space)
+        - name: RESOURCE_GROUP
+          value: $(params.resource-group)
       command:
         - /bin/bash
         - '-c'
       args: 
         - >
-          cd artifacts/$(params.directory-name);
+          cd /artifacts && source build.properties;
+          cd $(params.directory-name);
           source scripts/deploy/iks/tekton-catalog/iks-authenticate.sh;
           source scripts/deploy/iks/tekton-catalog/cleanup.sh;
+          source scripts/deploy/iks/undeploy-tekton.sh;
 # ==========================================================
 # Pipeline Loops Tasks
 # ==========================================================
@@ -293,7 +370,7 @@ spec:
     mountPath: /artifacts
   steps:
     - name: setup-deploy
-      image: docker.io/aipipeline/pipeline-base-image:1.0
+      image: docker.io/aipipeline/pipeline-base-image:1.2
       env:
         - name: CONTROLLER_IMAGE_URL
           value: $(params.controller-image-url)
@@ -336,7 +413,7 @@ spec:
     mountPath: /artifacts
   steps:
     - name: setup-deploy
-      image: docker.io/aipipeline/pipeline-base-image:1.0
+      image: docker.io/aipipeline/pipeline-base-image:1.2
       env:
         - name: KUBECTL_WRAPPER_IMAGE_URL
           value: $(params.kubectl-wrapper-image-url)
@@ -349,6 +426,79 @@ spec:
         - >
           cd artifacts/$(params.directory-name);
           source scripts/deploy/iks/tekton-catalog/setup-kubectl-wrapper-deploy.sh;
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: deploy-tekton
+spec:
+  params:
+    - name: directory-name
+      description: Directory to clone repository into
+      default: kfp-tekton
+    - name: apikey
+      description: the ibmcloud api key
+    - name: kubernetes-cluster
+      description: cluster name
+    - name: tekton-version
+      description: tekton version
+    - name: tekton-ns
+      description: tekton namespace
+      default: tekton-pipeline
+    - name: docker-username
+      description: for ibm container registry
+      default: iamapikey
+    - name: docker-password
+      description: iam api key
+    - name: archive-dir
+      description: archive directory
+      default: "."
+    - name: region
+      description: region
+    - name: org
+      description: organization
+    - name: space
+      description: space
+    - name: resource-group
+      description: resource group
+  workspaces:
+  - name: task-pvc
+    mountPath: /artifacts
+  steps:
+    - name: deploy-tekton
+      image: docker.io/aipipeline/pipeline-base-image:1.2
+      env:
+        - name: DOCKER_USERNAME
+          value: $(params.docker-username)
+        - name: DOCKER_PASSWORD
+          value: $(params.docker-password)
+        - name: IBM_CLOUD_API_KEY
+          value: $(params.apikey)
+        - name: PIPELINE_KUBERNETES_CLUSTER_NAME
+          value: $(params.kubernetes-cluster)
+        - name: TEKTON_VERSION
+          value: $(params.tekton-version)
+        - name: TEKTON_NS
+          value: $(params.tekton-ns)
+        - name: ARCHIVE_DIR
+          value: $(params.archive-dir)
+        - name: REGION
+          value: $(params.region)
+        - name: ORG
+          value: $(params.org)
+        - name: SPACE
+          value: $(params.space)
+        - name: RESOURCE_GROUP
+          value: $(params.resource-group)
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -ex;
+          cd /artifacts && source build.properties;
+          cd $(params.directory-name);
+          source ./scripts/deploy/iks/deploy-tekton.sh;
+          retry 3 3 kubectl patch cm feature-flags -n "$(params.tekton-ns)" -p '{"data":{"disable-home-env-overwrite":"true","disable-working-directory-overwrite":"true", "enable-custom-tasks": "true"}}';
+
 # ==========================================================
 # Imported Tasks - https://github.com/open-toolchain/tekton-catalog
 # ==========================================================
