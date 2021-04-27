@@ -95,36 +95,44 @@ spec:
       workspaces:
         - name: task-pvc
           workspace: pipeline-ws
+  
     - name: containerize-kubectl-wrapper
+      taskRef:
+        name: build-images-dnd
       runAfter:
         - build-kubectl-wrapper-binaries
-      taskRef:
-        name: icr-containerize
       params:
-        - name: continuous-delivery-context-secret
-          value: secure-properties
-        - name: container-registry-apikey-secret-key
-          value: apikey
-        - name: registry-region
-          value: $(params.registry-region)
+        - name: apikey
+          value: $(params.apikey)
+        - name: image-name
+          value: kubeclient
+        - name: docker-root
+          value: tekton-catalog/kubectl-wrapper
+        - name: docker-file
+          value: tekton-catalog/kubectl-wrapper/Dockerfile
+        - name: registry-url
+          value: us.icr.io
         - name: registry-namespace
           value: $(params.registry-namespace)
-        - name: image-name
-          value: "kubeclient"
-        - name: path-to-context
-          value: $(params.directory-name)/$(params.path-to-kubectl-wrapper-context)
-        - name: path-to-dockerfile
-          value: $(params.directory-name)/$(params.path-to-kubectl-wrapper-dockerfile)
-        - name: additional-tags-script
-          value: >
-            IMAGE_TAG=$(tasks.git-clone.results.image-tag)
-
-            echo "$IMAGE_TAG"
-        - name: pipeline-debug
-          value: $(params.pipeline-debug)
+        - name: docker-username
+          value: iamapikey
+        - name: docker-password
+          value: $(params.apikey)
+        - name: image-tag
+          value: $(tasks.git-clone.results.image-tag)
+        - name: run-task
+          value: image
+        - name: region
+          value: $(params.dev-region)
+        - name: org
+          value: $(params.dev-org)
+        - name: space
+          value: $(params.dev-space)
+        - name: resource-group
+          value: $(params.dev-resource-group)
       workspaces:
-        - name: source
-          workspace: pipeline-ws
+      - name: task-pvc
+        workspace: pipeline-ws
     - name: setup-kubectl-wrapper-deploy
       taskRef:
         name: setup-kubectl-wrapper-deploy
@@ -132,7 +140,7 @@ spec:
         - containerize-kubectl-wrapper
       params:
         - name: kubectl-wrapper-image-url
-          value: $(tasks.containerize-kubectl-wrapper.results.image-repository)
+          value: us.icr.io/kfp-tekton/kubeclient
         - name: image-tag
           value: $(tasks.git-clone.results.image-tag)
       workspaces:
@@ -169,71 +177,71 @@ spec:
       workspaces:
         - name: task-pvc
           workspace: pipeline-ws
-    - name: deploy-kubectl-wrapper-e2e
-      taskRef:
-        name: iks-deploy-to-kubernetes
-      runAfter:
-        - deploy-tekton
-      retries: 1
-      params:
-        - name: continuous-delivery-context-secret
-          value: secure-properties
-        - name: kubernetes-service-apikey-secret-key
-          value: apikey
-        - name: cluster-region
-          value: $(params.dev-region)
-        - name: resource-group
-          value: $(params.dev-resource-group)
-        - name: cluster-name
-          value: $(params.cluster-name)
-        - name: script
-          value: |
-            #!/bin/bash
-            set -euxo pipefail
-            cd $(params.directory-name)
-            source scripts/deploy/iks/tekton-catalog/deploy-kubectl-wrapper-e2e.sh
-            APP_URL="null"
-        - name: pipeline-debug
-          value: $(params.pipeline-debug)
-      workspaces:
-        - name: artifacts
-          workspace: pipeline-ws
-    - name: publish-kubectl-wrapper-image-to-dockerhub
-      taskRef:
-        name: publish-images-to-dockerhub
-      runAfter:
-        - deploy-kubectl-wrapper-e2e
-      when:
-        - input: $(params.push-to-dockerhub)
-          operator: in
-          values:
-            - '1'
-      params:
-        - name: continuous-delivery-context-secret
-          value: secure-properties
-        - name: kubernetes-service-apikey-secret-key
-          value: apikey
-        - name: dockerhub-token-secret-key
-          value: dockerhub-token
-        - name: cluster-region
-          value: $(params.dev-region)
-        - name: resource-group
-          value: $(params.dev-resource-group)
-        - name: cluster-name
-          value: $(params.cluster-name)
-        - name: directory-name
-          value: $(params.directory-name)
-        - name: dockerhub-username
-          value: $(params.dockerhub-username)
-        - name: docker-namespace
-          value: $(params.docker-namespace)
-        - name: image-tag
-          value: $(params.image-tag)
-        - name: publish-script
-          value: scripts/deploy/iks/tekton-catalog/publish-kubectl-wrapper-image.sh
-      workspaces:
-        - name: task-pvc
-          workspace: pipeline-ws
+    # - name: deploy-kubectl-wrapper-e2e
+    #   taskRef:
+    #     name: iks-deploy-to-kubernetes
+    #   runAfter:
+    #     - deploy-tekton
+    #   retries: 1
+    #   params:
+    #     - name: continuous-delivery-context-secret
+    #       value: secure-properties
+    #     - name: kubernetes-service-apikey-secret-key
+    #       value: apikey
+    #     - name: cluster-region
+    #       value: $(params.dev-region)
+    #     - name: resource-group
+    #       value: $(params.dev-resource-group)
+    #     - name: cluster-name
+    #       value: $(params.cluster-name)
+    #     - name: script
+    #       value: |
+    #         #!/bin/bash
+    #         set -euxo pipefail
+    #         cd $(params.directory-name)
+    #         source scripts/deploy/iks/tekton-catalog/deploy-kubectl-wrapper-e2e.sh
+    #         APP_URL="null"
+    #     - name: pipeline-debug
+    #       value: $(params.pipeline-debug)
+    #   workspaces:
+    #     - name: artifacts
+    #       workspace: pipeline-ws
+    # - name: publish-kubectl-wrapper-image-to-dockerhub
+    #   taskRef:
+    #     name: publish-images-to-dockerhub
+    #   runAfter:
+    #     - deploy-kubectl-wrapper-e2e
+    #   when:
+    #     - input: $(params.push-to-dockerhub)
+    #       operator: in
+    #       values:
+    #         - '1'
+    #   params:
+    #     - name: continuous-delivery-context-secret
+    #       value: secure-properties
+    #     - name: kubernetes-service-apikey-secret-key
+    #       value: apikey
+    #     - name: dockerhub-token-secret-key
+    #       value: dockerhub-token
+    #     - name: cluster-region
+    #       value: $(params.dev-region)
+    #     - name: resource-group
+    #       value: $(params.dev-resource-group)
+    #     - name: cluster-name
+    #       value: $(params.cluster-name)
+    #     - name: directory-name
+    #       value: $(params.directory-name)
+    #     - name: dockerhub-username
+    #       value: $(params.dockerhub-username)
+    #     - name: docker-namespace
+    #       value: $(params.docker-namespace)
+    #     - name: image-tag
+    #       value: $(params.image-tag)
+    #     - name: publish-script
+    #       value: scripts/deploy/iks/tekton-catalog/publish-kubectl-wrapper-image.sh
+    #   workspaces:
+    #     - name: task-pvc
+    #       workspace: pipeline-ws
   # ==========================================================
   # Final Task
   # ==========================================================
@@ -258,8 +266,6 @@ spec:
           value: $(params.dev-org)
         - name: space
           value: $(params.dev-space)
-        - name: resource-group
-          value: $(params.dev-resource-group)
       workspaces:
         - name: task-pvc
           workspace: pipeline-ws
